@@ -116,41 +116,27 @@ class textureParser:
     def cmpr(buffer, width, height, paletteBuffer=None, pixelFormat=None):
         df = NINTEX_CMPR
         name, decoder, bpp, bw, bh, bSimple, paletteLen = dataFormats[df]
-        bs = NoeBitStream(buffer, NOE_BIGENDIAN)
         _width, _height = getStorageWH(width, height, df)
-        textureData = bytearray(_width * _height * 4)
+        textureData = buffer
 
-        for y in range(0, _height, bh):
-            for x in range(0, _width, bw):
-                for y2 in range(0, bh, 4):
-                    for x2 in range(0, bw, 4):
-                        c0 = bs.readUShort()
-                        c1 = bs.readUShort()
+        blockStride = _width * 4
+        textureData = rapi.swapEndianArray(textureData, 0x02, 0x00, 0x08)
+        textureData = rapi.swapEndianArray(textureData, 0x02, 0x02, 0x08)
+        for i, b in enumerate(textureData):
+            if i & 0x7 < 4: continue  # only process bytes 4-8 for each chunk
+            textureData[i] = (b & 0x03) << 6 | (b & 0x0C) << 2 | (b & 0x30) >> 2 | (b & 0xC0) >> 6
+        for i in range(0, len(textureData), blockStride):
+            dataBlock = textureData[i:i + blockStride]
+            dataRow1 = noesis.deinterleaveBytes(dataBlock, 0x00, 0x10, 0x20)
+            dataRow2 = noesis.deinterleaveBytes(dataBlock, 0x10, 0x10, 0x20)
+            textureData[i:i + blockStride] = dataRow1 + dataRow2
 
-                        c = [
-                            pixelParser.rgb565(c0),
-                            pixelParser.rgb565(c1),
-                            bytearray(4),
-                            bytearray(4)
-                        ]
+        #textureData = rapi.imageDecodeDXT(textureData, _width, _height, noesis.NOESISTEX_DXT1)
+        #textureData = crop(textureData, _width, _height, 32, width, height)
+        #return NoeTexture("default", width, height, textureData, noesis.NOESISTEX_RGBA32)
 
-                        if c0 > c1:
-                            for i in range(4):
-                                c[2][i] = int((2 * c[0][i] + c[1][i]) / 3)
-                                c[3][i] = int((2 * c[1][i] + c[0][i]) / 3)
-                        else:
-                            for i in range(4):
-                                c[2][i] = int((c[0][i] + c[1][i]) * .5)
-                                c[3][i] = 0
-
-                        for y3 in range(4):
-                            b = bs.readUByte()
-                            for x3 in range(4):
-                                idx = (((y + y2 + y3) * _width) + (x + x2 + x3)) * 4
-                                textureData[idx : idx + 4] = c[(b >> (6 - (x3 * 2))) & 0x3]
-
-        textureData = crop(textureData, _width, _height, 32, width, height)
-        return NoeTexture("default", width, height, textureData, noesis.NOESISTEX_RGBA32)
+        # cropping isn't needed in this case, a size difference within 4px will auto-crop
+        return NoeTexture("default", width, height, textureData, noesis.NOESISTEX_DXT1)
 
     @staticmethod
     def rgba32(buffer, width, height, paletteBuffer=None, pixelFormat=None):
@@ -202,15 +188,15 @@ class textureParser:
 
     @staticmethod
     def c4(buffer, width, height, paletteBuffer, pixelFormat):
-        return indexed(0x08, buffer, width, height, paletteBuffer, pixelFormat)
+        return textureParser.indexed(0x08, buffer, width, height, paletteBuffer, pixelFormat)
 
     @staticmethod
     def c8(buffer, width, height, paletteBuffer, pixelFormat):
-        return indexed(0x09, buffer, width, height, paletteBuffer, pixelFormat)
+        return textureParser.indexed(0x09, buffer, width, height, paletteBuffer, pixelFormat)
 
     @staticmethod
     def c14x2(buffer, width, height, paletteBuffer, pixelFormat):
-        return indexed(0x0A, buffer, width, height, paletteBuffer, pixelFormat)
+        return textureParser.indexed(0x0A, buffer, width, height, paletteBuffer, pixelFormat)
 
 
 dataFormats = {
