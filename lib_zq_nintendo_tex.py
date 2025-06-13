@@ -117,26 +117,30 @@ class textureParser:
         df = NINTEX_CMPR
         name, decoder, bpp, bw, bh, bSimple, paletteLen = dataFormats[df]
         _width, _height = getStorageWH(width, height, df)
-        textureData = buffer
+        textureData = bytearray(len(buffer))
 
         blockStride = _width * 4
-        textureData = rapi.swapEndianArray(textureData, 0x02, 0x00, 0x08)
-        textureData = rapi.swapEndianArray(textureData, 0x02, 0x02, 0x08)
-        for i, b in enumerate(textureData):
-            if i & 0x7 < 4: continue  # only process bytes 4-8 for each chunk
-            textureData[i] = (b & 0x03) << 6 | (b & 0x0C) << 2 | (b & 0x30) >> 2 | (b & 0xC0) >> 6
-        for i in range(0, len(textureData), blockStride):
-            dataBlock = textureData[i:i + blockStride]
+        for i in range(0, len(buffer), blockStride):
+            dataBlock = buffer[i:i + blockStride]
             dataRow1 = noesis.deinterleaveBytes(dataBlock, 0x00, 0x10, 0x20)
             dataRow2 = noesis.deinterleaveBytes(dataBlock, 0x10, 0x10, 0x20)
             textureData[i:i + blockStride] = dataRow1 + dataRow2
+        textureData = rapi.swapEndianArray(textureData, 0x02, 0x00, 0x08)
+        textureData = rapi.swapEndianArray(textureData, 0x02, 0x02, 0x08)
+        for i in range(4, len(textureData), 8):
+            for j in range(i, i + 4):
+                b = textureData[j]
+                textureData[j] = (b & 0x03) << 6 | (b & 0x0C) << 2 | (b & 0x30) >> 2 | (b & 0xC0) >> 6
 
-        #textureData = rapi.imageDecodeDXT(textureData, _width, _height, noesis.NOESISTEX_DXT1)
-        #textureData = crop(textureData, _width, _height, 32, width, height)
-        #return NoeTexture("default", width, height, textureData, noesis.NOESISTEX_RGBA32)
-
+        # TODO: toggle to preserve CMPR data blocks as BC1/DXT1 when exporting to .DDS
+        # couldn't come up with a clean way on the current setup other than messy globals
         # cropping isn't needed in this case, a size difference within 4px will auto-crop
-        return NoeTexture("default", width, height, textureData, noesis.NOESISTEX_DXT1)
+        #return NoeTexture("default", width, height, textureData, noesis.NOESISTEX_DXT1)
+
+        # returning RGBA32 should still be "legacy" default as plugins do rely on this behavior
+        textureData = rapi.imageDecodeDXT(textureData, _width, _height, noesis.NOESISTEX_DXT1)
+        textureData = crop(textureData, _width, _height, 32, width, height)
+        return NoeTexture("default", width, height, textureData, noesis.NOESISTEX_RGBA32)
 
     @staticmethod
     def rgba32(buffer, width, height, paletteBuffer=None, pixelFormat=None):
@@ -151,9 +155,9 @@ class textureParser:
                 for y2 in range(bh):
                     for x2 in range(bw):
                         idx = (((y + y2) * _width) + (x + x2)) * 4
-                        textureData[idx + 0] = buffer[offset + 33]
+                        textureData[idx + 0] = buffer[offset + 1]
                         textureData[idx + 1] = buffer[offset + 32]
-                        textureData[idx + 2] = buffer[offset + 1]
+                        textureData[idx + 2] = buffer[offset + 33]
                         textureData[idx + 3] = buffer[offset + 0]
                         offset += 2
                 offset += 32
